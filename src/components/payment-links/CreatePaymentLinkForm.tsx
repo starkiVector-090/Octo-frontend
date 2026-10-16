@@ -5,6 +5,7 @@ import { Modal } from "@/components/dashboard/Modal";
 import { ActionButton } from "@/components/dashboard/WalletUI";
 import { uploadImage, validateImage } from "@/lib/uploads";
 import { isTrustedImageUrl } from "@/lib/isTrustedImageUrl";
+import { validateRedirectUrl } from "@/lib/redirectUrl";
 import { asAuthToken, asWalletId } from "@/lib/brands";
 import { usdAmountToStroops, createPaymentLink, type PaymentLink } from "@/lib/payment-links";
 
@@ -55,6 +56,12 @@ export function CreatePaymentLinkForm({
       const amountUsdcStroops = amount.trim() ? usdAmountToStroops(amount.trim()) : undefined;
       if (amount.trim() && amountUsdcStroops === null) {
         setError("Enter a valid positive amount, or leave it blank for a flexible amount.");
+        setCreating(false);
+        return;
+      }
+      const redirectError = validateRedirectUrl(redirectUrl.trim());
+      if (redirectError) {
+        setError(redirectError);
         setCreating(false);
         return;
       }

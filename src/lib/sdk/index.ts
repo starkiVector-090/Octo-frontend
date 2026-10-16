@@ -21,8 +21,9 @@ export {
   buildUnsignedPayment,
   txExpiresAt,
   TX_TIMEOUT_SECONDS,
+  validateMemo,
 } from "./tx";
-export type { SigningInfo } from "./tx";
+export type { SigningInfo, Memo } from "./tx";
 
 export {
   getSigningInfo,

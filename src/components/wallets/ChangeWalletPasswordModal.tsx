@@ -20,7 +20,11 @@ import { assessPassword, PasswordStrengthMeter, MIN_PASSWORD_LENGTH, type Passwo
  *  1. Decrypt the backup with the current password (proves ownership).
  *  2. Re-encrypt the mnemonic under the new password.
  *  3. Upload the new backup; only on success update localStorage.
- * The mnemonic lives in memory only for the duration of step 2 and is cleared immediately.
+ *
+ * The local backup cache is refreshed from the authoritative server copy if it is stale (e.g. the
+ * password was changed on another device), so the user's current password keeps working across
+ * devices. The mnemonic lives in memory only for the duration of re-encryption and is cleared
+ * immediately.
  */
 export function ChangeWalletPasswordModal({
   token,
@@ -50,6 +54,35 @@ export function ChangeWalletPasswordModal({
       setPwFeedback(result.feedback);
       setPwAssessment(result);
     } catch { setPwFeedback([]); setPwAssessment(null); }
+  }
+
+  /** Load the authoritative backup, refreshing the local cache if it is stale. */
+  async function loadAuthoritativeBackup(password: string) {
+    const local = loadLocalBackup(walletId);
+    if (local) {
+      try {
+        const mnemonic = await decryptSeed(local.backup, password);
+        return { mnemonic, backup: local.backup, version: local.version };
+      } catch (err) {
+        // Wrong password or a stale cache — fall through to the server copy below.
+        if (!(err instanceof Error) || !/Incorrect password|corrupted backup/.test(err.message)) {
+          throw err;
+        }
+      }
+    }
+    const remote = await getBackup(token, walletId);
+    if (!remote || !remote.encrypted_backup) {
+      throw new Error("No backup found for this wallet. Recover it with your recovery phrase first.");
+    }
+    const serverVersion = remote.backup_version ?? remote.encrypted_backup;
+    if (!local || serverVersion !== local.version) {
+      const parsed = parseBackup(remote.encrypted_backup);
+      saveLocalBackup(walletId, parsed, serverVersion);
+      const mnemonic = await decryptSeed(parsed, password);
+      return { mnemonic, backup: parsed, version: serverVersion };
+    }
+    // Cache matches the server: the password is wrong.
+    throw new Error("Incorrect password or corrupted backup.");
   }
 
   async function handleSubmit(e: React.FormEvent) {
@@ -83,23 +116,17 @@ export function ChangeWalletPasswordModal({
     setBusy(true);
     let mnemonic = "";
     try {
-      // Load backup (local preferred, then server).
-      let backup = loadLocalBackup(walletId);
-      if (!backup) {
-        const remote = await getBackup(token, walletId);
-        if (!remote.encrypted_backup) {
-          throw new Error("No backup found for this wallet. Recover it with your recovery phrase first.");
-        }
-        backup = parseBackup(remote.encrypted_backup);
-      }
-      // Decrypt with current password — throws on wrong password.
-      mnemonic = await decryptSeed(backup, currentPassword);
+      // Decrypt the current backup (local, refreshed from the server if stale). Throws on wrong
+      // password or if no backup exists anywhere.
+      const { mnemonic: decrypted } = await loadAuthoritativeBackup(currentPassword);
+      mnemonic = decrypted;
       // Re-encrypt under new password.
       const newBackup = await encryptSeed(mnemonic, newPassword);
       const serialized = serializeBackup(newBackup);
       // Server first — only update locally after confirmed.
-      await uploadBackup(token, walletId, serialized);
-      saveLocalBackup(walletId, newBackup);
+      const uploaded = await uploadBackup(token, walletId, serialized);
+      // Refresh the local cache with the authoritative new copy + its server version.
+      saveLocalBackup(walletId, newBackup, uploaded.backup_version ?? serialized);
       setDone(true);
       toast.success("Wallet password changed successfully.");
     } catch (err) {
@@ -121,7 +148,8 @@ export function ChangeWalletPasswordModal({
           <p className="text-3xl text-burgundy-bright">✓</p>
           <p className="mt-2 font-medium text-foreground">Password updated</p>
           <p className="mt-1 text-sm text-muted">
-            Only the new password unlocks this wallet on every device.
+            The new backup is stored on Octo and cached here. Other devices pick it up
+            automatically the next time they unlock, so the new password works everywhere.
           </p>
           <button
             onClick={onDone}
@@ -139,7 +167,7 @@ export function ChangeWalletPasswordModal({
       <p className="text-sm text-muted">
         Decrypt your wallet with the current password, then choose a new one. The new backup is
         uploaded before your local copy is updated — if the upload fails, the old password still
-        works.
+        works. On other devices, the cached backup refreshes automatically on the next unlock.
       </p>
       <form onSubmit={handleSubmit} className="mt-5 space-y-4">
         <div>

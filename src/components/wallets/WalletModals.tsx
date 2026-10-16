@@ -11,7 +11,8 @@ import { explorerTxUrl } from "@/lib/network";
 import {
   unlockWallet, getSigningInfo, submitSigned, requestWithdrawOtp, confirmWithdraw,
   getAccountExists, buildSignedPayment, buildSignedChangeTrust, buildSignedCreateAccount,
-  txExpiresAt, TX_TIMEOUT_SECONDS, assertNetworkConsistency, type SigningInfo, type SubmitResult,
+  txExpiresAt, TX_TIMEOUT_SECONDS, assertNetworkConsistency, validateMemo,
+  type SigningInfo, type SubmitResult, type Memo,
 } from "@/lib/sdk";
 import { parseAmount, formatStroops } from "@/lib/amount";
 import { validateStellarAddress, getStellarAddressKind, baseAccountOf } from "@/lib/stellar/address";
@@ -267,6 +268,8 @@ export function WithdrawModal({
   const [selectedCode, setSelectedCode] = useState((assets[0] ?? defaultAsset).code);
   const [destination, setDestination] = useState("");
   const [amount, setAmount] = useState("");
+  const [memo, setMemo] = useState("");
+  const [memoType, setMemoType] = useState<"text" | "id">("text");
   const [password, setPassword] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -333,6 +336,11 @@ export function WithdrawModal({
           : `You can send at most ${formatStroops(spendableStroops)} XLM — the rest covers Stellar's minimum reserve and the network fee.`,
       };
     }
+    const memoValue = memo.trim();
+    if (memoValue) {
+      const memoError = validateMemo(memoType === "id" ? { type: "id", id: memoValue } : { type: "text", text: memoValue });
+      if (memoError) return { error: memoError };
+    }
     return { stroops: parsed.stroops };
   }
 
@@ -378,16 +386,24 @@ export function WithdrawModal({
       const keypair = await unlockWallet(token, walletId, password, walletAddress);
       const info = await getSigningInfo(token, walletId);
       assertNetworkConsistency(info.network_passphrase);
+      const memoValue = memo.trim();
+      const memoPayload: Memo | undefined = memoValue
+        ? memoType === "id"
+          ? { type: "id", id: memoValue }
+          : { type: "text", text: memoValue }
+        : undefined;
       const normalized = formatStroops(checked.stroops);
       const signedXdr = needsCreate
         ? buildSignedCreateAccount(keypair, info, {
             destination,
             startingBalance: normalized,
+            memo: memoPayload,
           })
         : buildSignedPayment(keypair, info, {
             destination,
             amount: normalized,
             asset: selected.asset, // undefined => XLM
+            memo: memoPayload,
           });
       await requestWithdrawOtp(token, walletId, signedXdr);
       setCreatesAccount(needsCreate);
@@ -548,6 +564,11 @@ export function WithdrawModal({
           </span>
           .
         </p>
+        {memo.trim() && (
+          <p className="mt-1 text-center text-xs text-muted">
+            Memo: {memoType === "id" ? "ID " : "Text "}{memo.trim()}
+          </p>
+        )}
         {createsAccount && (
           <p className="mt-2 text-center text-xs text-muted">
             This address isn&apos;t activated yet — this withdrawal will create it.
@@ -691,6 +712,46 @@ export function WithdrawModal({
             placeholder="0.0000000"
             className="mt-1 w-full rounded-lg border border-border bg-surface-sunken px-3 py-2 text-sm text-foreground placeholder:text-muted/50 focus:border-burgundy-bright focus:outline-none"
           />
+        </div>
+        <div>
+          <div className="flex items-center justify-between">
+            <label className="text-xs text-muted">Memo (optional)</label>
+            <div className="flex gap-1">
+              <button
+                type="button"
+                onClick={() => setMemoType("text")}
+                className={`rounded-lg border px-2 py-1 text-xs transition-colors ${
+                  memoType === "text"
+                    ? "border-burgundy-bright bg-burgundy/20 text-foreground"
+                    : "border-border bg-surface-sunken text-muted hover:border-border-strong"
+                }`}
+              >
+                Text
+              </button>
+              <button
+                type="button"
+                onClick={() => setMemoType("id")}
+                className={`rounded-lg border px-2 py-1 text-xs transition-colors ${
+                  memoType === "id"
+                    ? "border-burgundy-bright bg-burgundy/20 text-foreground"
+                    : "border-border bg-surface-sunken text-muted hover:border-border-strong"
+                }`}
+              >
+                ID
+              </button>
+            </div>
+          </div>
+          <input
+            value={memo}
+            onChange={(e) => setMemo(e.target.value.trim())}
+            placeholder={memoType === "text" ? "e.g. Invoice 123" : "e.g. 12345"}
+            className="mt-1 w-full rounded-lg border border-border bg-surface-sunken px-3 py-2 text-sm text-foreground placeholder:text-muted/50 focus:border-burgundy-bright focus:outline-none"
+          />
+          <p className="mt-1 text-[11px] text-muted">
+            {memoType === "text"
+              ? "Text memos are limited to 28 characters."
+              : "Numeric memo ID (up to 64 bits). Exchanges/custodians may require this to credit deposits."}
+          </p>
         </div>
         <div>
           <label className="text-xs text-muted">Wallet password (to sign)</label>

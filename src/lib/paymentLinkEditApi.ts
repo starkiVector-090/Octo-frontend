@@ -3,6 +3,7 @@
 import { apiFetch, path } from "./api";
 import type { AuthToken, WalletId } from "./brands";
 import type { PaymentLink } from "./payment-links";
+import { validateRedirectUrl } from "./redirectUrl";
 
 export type PaymentLinkEdit = {
   name: string;
@@ -30,13 +31,5 @@ export function updatePaymentLink(
   });
 }
 
-/** Redirect targets must be http(s) URLs; returns an error message or null. */
-export function validateRedirectUrl(value: string): string | null {
-  if (!value) return null;
-  try {
-    const u = new URL(value);
-    return u.protocol === "https:" || u.protocol === "http:" ? null : "Redirect URL must start with https://.";
-  } catch {
-    return "Enter a valid redirect URL.";
-  }
-}
+/** Redirect targets must be https URLs; returns an error message or null. */
+export { validateRedirectUrl };

@@ -9,6 +9,7 @@ import {
   Account,
   Asset,
   Keypair,
+  Memo as StellarMemo,
   Operation,
   TransactionBuilder,
 } from "@stellar/stellar-base";
@@ -63,6 +64,34 @@ export function getFeeStroops(info: SigningInfo): number {
   return validateFee(info.base_fee_stroops);
 }
 
+/** A withdrawal memo — either text (max 28 chars) or a numeric ID (uint64). */
+export type Memo =
+  | { type: "text"; text: string }
+  | { type: "id"; id: string };
+
+/** Largest Stellar memo ID (2^64 − 1). */
+const MAX_MEMO_ID = BigInt("18446744073709551615");
+
+/** Validate an optional memo; returns an error message or null when acceptable. */
+export function validateMemo(memo?: Memo): string | null {
+  if (!memo) return null;
+  if (memo.type === "text") {
+    if (memo.text.length === 0) return "Memo text cannot be empty.";
+    if (memo.text.length > 28) return "Memo text must be 28 characters or fewer.";
+    return null;
+  }
+  if (!/^\d+$/.test(memo.id)) return "Memo ID must be a non-negative integer.";
+  const value = BigInt(memo.id);
+  if (value > MAX_MEMO_ID) return "Memo ID must fit in 64 bits.";
+  return null;
+}
+
+function attachMemo(builder: TransactionBuilder, memo?: Memo): TransactionBuilder {
+  if (!memo) return builder;
+  if (memo.type === "text") return builder.addMemo(StellarMemo.text(memo.text));
+  return builder.addMemo(StellarMemo.id(memo.id));
+}
+
 /** stellar-base wants fees in stroops as a string, and the sequence pre-increment handled for us. */
 function newBuilder(sourceAccount: string, info: SigningInfo) {
   const fee = validateFee(info.base_fee_stroops);
@@ -83,13 +112,14 @@ export function buildSignedPayment(
     destination: string;
     amount: string;
     asset?: { code: string; issuer: string };
+    memo?: Memo;
   },
 ): string {
   assertNetworkConsistency(info.network_passphrase);
   const asset = params.asset
     ? new Asset(params.asset.code, params.asset.issuer)
     : Asset.native();
-  const tx = newBuilder(keypair.publicKey(), info)
+  const builder = newBuilder(keypair.publicKey(), info)
     .addOperation(
       Operation.payment({
         destination: params.destination,
@@ -97,8 +127,9 @@ export function buildSignedPayment(
         amount: params.amount,
       }),
     )
-    .setTimeout(TX_TIMEOUT_SECONDS)
-    .build();
+    .setTimeout(TX_TIMEOUT_SECONDS);
+  attachMemo(builder, params.memo);
+  const tx = builder.build();
   tx.sign(keypair);
   return tx.toXDR();
 }
@@ -111,18 +142,19 @@ export function buildSignedPayment(
 export function buildSignedCreateAccount(
   keypair: Keypair,
   info: SigningInfo,
-  params: { destination: string; startingBalance: string },
+  params: { destination: string; startingBalance: string; memo?: Memo },
 ): string {
   assertNetworkConsistency(info.network_passphrase);
-  const tx = newBuilder(keypair.publicKey(), info)
+  const builder = newBuilder(keypair.publicKey(), info)
     .addOperation(
       Operation.createAccount({
         destination: params.destination,
         startingBalance: params.startingBalance,
       }),
     )
-    .setTimeout(TX_TIMEOUT_SECONDS)
-    .build();
+    .setTimeout(TX_TIMEOUT_SECONDS);
+  attachMemo(builder, params.memo);
+  const tx = builder.build();
   tx.sign(keypair);
   return tx.toXDR();
 }

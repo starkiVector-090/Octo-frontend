@@ -75,10 +75,12 @@ export function confirmWithdraw(
 
 /** Fetch the opaque encrypted backup blob for new-device recovery (may be null). */
 export function getBackup(token: string, walletId: string) {
-  return apiFetch<{ wallet_id: string; encrypted_backup: string | null }>(
-    path`/v1/wallets/${walletId}/backup`,
-    { token },
-  );
+  return apiFetch<{
+    wallet_id: string;
+    encrypted_backup: string | null;
+    /** Server-assigned version of the backup copy, when the backend reports one. */
+    backup_version?: string | null;
+  }>(path`/v1/wallets/${walletId}/backup`, { token });
 }
 
 /** Whether a Stellar account (G...) exists on-chain, looked up server-side via Horizon. */
@@ -91,7 +93,11 @@ export function getAccountExists(token: string, walletId: string, account: strin
 
 /** Upload (or replace) the encrypted backup blob stored server-side for a wallet. */
 export function uploadBackup(token: string, walletId: string, encryptedBackup: string) {
-  return apiFetch<{ stored: boolean }>(path`/v1/wallets/${walletId}/backup`, {
+  return apiFetch<{
+    stored: boolean;
+    /** Server-assigned version of the newly stored backup copy, when the backend reports one. */
+    backup_version?: string | null;
+  }>(path`/v1/wallets/${walletId}/backup`, {
     method: "PUT",
     token,
     body: JSON.stringify({ encrypted_backup: encryptedBackup }),

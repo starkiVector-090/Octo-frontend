@@ -21,7 +21,8 @@ export function DownloadBackupButton({
     setBusy(true);
     try {
       // Prefer the local copy; fall back to the server-held blob.
-      let backup = loadLocalBackup(walletId);
+      const cached = loadLocalBackup(walletId);
+      let backup = cached?.backup ?? null;
       if (!backup) {
         const remote = await getBackup(token, walletId);
         if (!remote.encrypted_backup) throw new Error("No encrypted backup found for this wallet.");

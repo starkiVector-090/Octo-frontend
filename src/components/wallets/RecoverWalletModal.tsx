@@ -103,8 +103,8 @@ export function RecoverWalletModal({
       const backup = await encryptSeed(keys.mnemonic, newPassword);
       const serialized = serializeBackup(backup);
       // Upload to the server first — only persist locally on success.
-      await uploadBackup(token, walletId, serialized);
-      saveLocalBackup(walletId, backup);
+      const uploaded = await uploadBackup(token, walletId, serialized);
+      saveLocalBackup(walletId, backup, uploaded.backup_version ?? serialized);
       setStep("done");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not save the backup.");
